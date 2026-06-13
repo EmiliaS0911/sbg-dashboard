@@ -247,6 +247,10 @@ document.addEventListener('DOMContentLoaded', function() {
     allow_symbol_change: false,
     hide_top_toolbar: false,
     save_image: false,
+    withdateranges: true,
+    details: true,
+    hotlist: false,
+    calendar: false,
     studies: [
       'MASimple@tv-basicstudies',
       'MASimple@tv-basicstudies',
@@ -257,6 +261,9 @@ document.addEventListener('DOMContentLoaded', function() {
     studies_overrides: {
       'moving average.length.0': 25,
       'moving average.length.1': 75,
+    },
+    overrides: {
+      'mainSeriesProperties.symbol': 'TSE:9984',
     }
   });
 });
@@ -311,6 +318,13 @@ function fmtJPY(n) {
   if (n >= 1e4)  return (n / 1e4).toFixed(0)  + '万円';
   return fmtInt(n) + '円';
 }
+function fmtUSD(n) {
+  if (n == null || isNaN(n)) return '―';
+  if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+  if (n >= 1e9)  return '$' + (n / 1e9).toFixed(1)  + 'B';
+  if (n >= 1e6)  return '$' + (n / 1e6).toFixed(1)  + 'M';
+  return '$' + n.toFixed(2);
+}
 function fmtVol(n) {
   if (n == null || isNaN(n)) return '―';
   if (n >= 1e8) return (n / 1e8).toFixed(1) + '億株';
@@ -344,8 +358,8 @@ async function loadFundamentals() {
   try {
     // Fetch price + overview in parallel
     const [quoteData, overviewData] = await Promise.all([
-      avFetch({ function: 'GLOBAL_QUOTE', symbol: '9984.T' }),
-      avFetch({ function: 'OVERVIEW',     symbol: '9984.T' }),
+      avFetch({ function: 'GLOBAL_QUOTE', symbol: 'SFTBY' }),
+      avFetch({ function: 'OVERVIEW',     symbol: 'SFTBY' }),
     ]);
 
     const q = quoteData['Global Quote'] || {};
@@ -383,15 +397,15 @@ async function loadFundamentals() {
 
     // ── Header
     document.getElementById('h-price').textContent =
-      price != null ? `¥${fmtInt(price)}` : '―';
+      price != null ? `$${price.toFixed(2)} (SFTBY/USD)` : '―';
 
     const chEl = document.getElementById('h-change');
     if (change != null) {
       const up = change >= 0;
       chEl.className = `price-change ${up ? 'up' : 'down'}`;
-      chEl.textContent = `${up ? '▲' : '▼'} ¥${fmtInt(Math.abs(change))} (${Math.abs(changePct).toFixed(2)}%)`;
+      chEl.textContent = `${up ? '▲' : '▼'} $${Math.abs(change).toFixed(2)} (${Math.abs(changePct).toFixed(2)}%)`;
     }
-    document.getElementById('h-mcap').textContent = fmtJPY(mcap);
+    document.getElementById('h-mcap').textContent = fmtUSD(mcap);
     document.getElementById('h-vol').textContent  = fmtVol(volume);
     document.getElementById('h-updated').textContent =
       `最終更新: ${new Date().toLocaleString('ja-JP')}　基準日: ${latestDay}`;
@@ -400,28 +414,28 @@ async function loadFundamentals() {
     document.getElementById('s-per').textContent  = per      ? fmtNum(per, 1) + '倍'      : '―';
     document.getElementById('s-fper').textContent = forwardPE ? fmtNum(forwardPE,1) + '倍' : '―';
     document.getElementById('s-pbr').textContent  = pbr      ? fmtNum(pbr, 2) + '倍'      : '―';
-    document.getElementById('s-eps').textContent  = eps      ? '¥' + fmtInt(eps)           : '―';
+    document.getElementById('s-eps').textContent  = eps      ? '$' + eps.toFixed(2)         : '―';
     document.getElementById('s-div').textContent  = divYield ? (divYield * 100).toFixed(2) + '%' : '―';
-    document.getElementById('s-high').textContent = high52   ? '¥' + fmtInt(high52)        : '―';
-    document.getElementById('s-low').textContent  = low52    ? '¥' + fmtInt(low52)         : '―';
+    document.getElementById('s-high').textContent = high52   ? '$' + high52.toFixed(2)     : '―';
+    document.getElementById('s-low').textContent  = low52    ? '$' + low52.toFixed(2)      : '―';
     document.getElementById('s-pm').textContent   = profitMargin ? (profitMargin * 100).toFixed(1) + '%' : '―';
 
     // ── Fundamentals table
     const items = [
-      ['時価総額',           fmtJPY(mcap)],
-      ['当日始値',           price != null ? `¥${fmtInt(open)}` : '―'],
-      ['当日高値',           high  != null ? `¥${fmtInt(high)}`  : '―'],
-      ['当日安値',           low   != null ? `¥${fmtInt(low)}`   : '―'],
-      ['前日終値',           prevClose != null ? `¥${fmtInt(prevClose)}` : '―'],
+      ['時価総額(USD)',       fmtUSD(mcap)],
+      ['当日始値(USD)',       open != null ? `$${open.toFixed(2)}`           : '―'],
+      ['当日高値(USD)',       high != null ? `$${high.toFixed(2)}`            : '―'],
+      ['当日安値(USD)',       low  != null ? `$${low.toFixed(2)}`             : '―'],
+      ['前日終値(USD)',       prevClose != null ? `$${prevClose.toFixed(2)}` : '―'],
       ['出来高',             fmtVol(volume)],
       ['PER（実績TTM）',     per       ? fmtNum(per, 1) + '倍'       : '―'],
       ['PER（予想）',        forwardPE ? fmtNum(forwardPE, 1) + '倍' : '―'],
       ['PBR',                pbr       ? fmtNum(pbr, 2) + '倍'       : '―'],
-      ['EPS（TTM）',         eps       ? '¥' + fmtInt(eps)           : '―'],
-      ['1株純資産（BPS）',   bv        ? '¥' + fmtNum(bv, 0)        : '―'],
+      ['EPS（TTM）',         eps       ? '$' + eps.toFixed(2)         : '―'],
+      ['1株純資産（BPS）',   bv        ? '$' + parseFloat(bv).toFixed(2) : '―'],
       ['配当利回り',         divYield  ? (divYield * 100).toFixed(2) + '%' : '―'],
-      ['52週高値',           high52    ? '¥' + fmtInt(high52)        : '―'],
-      ['52週安値',           low52     ? '¥' + fmtInt(low52)         : '―'],
+      ['52週高値(USD)',       high52    ? '$' + high52.toFixed(2)     : '―'],
+      ['52週安値(USD)',       low52     ? '$' + low52.toFixed(2)      : '―'],
       ['純利益率（TTM）',    profitMargin ? (profitMargin*100).toFixed(1)+'%' : '―'],
       ['営業利益率（TTM）',  opMargin  ? (opMargin*100).toFixed(1)+'%' : '―'],
       ['ROE（TTM）',         roe       ? (roe*100).toFixed(1)+'%'    : '―'],
@@ -440,9 +454,9 @@ async function loadFundamentals() {
         ).join('')}
       </div>
       <div class="nav-note">
-        💡 <strong>SBG固有の指標</strong>：NAV（純資産価値）は
+        💡 財務データはSFTBY（米国OTC・USD建て）より取得。チャートはTSE:9984（円）。PER/PBR等の比率は同一。NAVは
         <a href="https://group.softbank/ja/ir/stock/sotp" target="_blank" style="color:#58a6ff;">SoftBank Group 公式IR</a>
-        で確認できます。データ提供: Alpha Vantage（無料版・日次更新）
+        で確認。データ提供: Alpha Vantage（無料版・日次更新）
       </div>`;
 
   } catch (e) {
@@ -460,7 +474,7 @@ async function loadNews() {
   try {
     const data = await avFetch({
       function: 'NEWS_SENTIMENT',
-      tickers: '9984.T',
+      tickers: 'SFTBY',
       limit: '10',
     });
 
