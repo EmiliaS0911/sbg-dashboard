@@ -285,7 +285,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 
-<!-- ─── Data fetch (Yahoo Finance via CORS proxy) ─ -->
+<!-- ─── Data fetch (Alpha Vantage API) ─ -->
 <script>
 // ── Formatters ───────────────────────────────────
 function fmtNum(n, d = 1) {
@@ -300,6 +300,10 @@ function fmtPct(n) {
   if (n == null || isNaN(n)) return '―';
   return (n * 100).toFixed(2) + '%';
 }
+function fmtPctStr(s) {
+  if (!s) return '―';
+  return parseFloat(s).toFixed(2) + '%';
+}
 function fmtJPY(n) {
   if (n == null || isNaN(n)) return '―';
   if (n >= 1e12) return (n / 1e12).toFixed(1) + '兆円';
@@ -313,130 +317,120 @@ function fmtVol(n) {
   if (n >= 1e4) return (n / 1e4).toFixed(0) + '万株';
   return fmtInt(n) + '株';
 }
-function fmtDate(ts) {
-  if (!ts) return '';
-  return new Date(ts * 1000).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' });
+function fmtAVDate(s) {
+  // "20260613T120000" → "2026年6月13日"
+  if (!s || s.length < 8) return '';
+  const y = s.slice(0,4), m = s.slice(4,6), d = s.slice(6,8);
+  return `${y}年${parseInt(m)}月${parseInt(d)}日`;
+}
+function safeNum(s) {
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
 }
 
-// ── CORS proxy fetch ─────────────────────────────
-async function proxyFetch(url, timeoutMs = 10000) {
-  const proxies = [
-    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  ];
-  for (const makeProxy of proxies) {
-    try {
-      const res = await fetch(makeProxy(url), { signal: AbortSignal.timeout(timeoutMs) });
-      if (!res.ok) continue;
-      const json = await res.json();
-      // allorigins wraps in {contents:"..."}, corsproxy returns raw JSON
-      if (json && json.contents) return JSON.parse(json.contents);
-      return json;
-    } catch (e) { /* try next */ }
-  }
-  throw new Error('全プロキシが失敗しました。');
+// ── Alpha Vantage fetch (no proxy needed — supports CORS) ──
+const AV_KEY = '2JWFAEIKIZ40QPTL';
+const AV_BASE = 'https://www.alphavantage.co/query';
+
+async function avFetch(params, timeoutMs = 12000) {
+  const url = AV_BASE + '?' + new URLSearchParams({ ...params, apikey: AV_KEY });
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 // ── Load fundamentals + price ────────────────────
 async function loadFundamentals() {
-  const apiUrl = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/9984.T'
-    + '?modules=price,summaryDetail,defaultKeyStatistics,financialData';
-
-  let data;
   try {
-    data = await proxyFetch(apiUrl);
-  } catch (e) {
-    document.getElementById('fund-body').innerHTML =
-      `<div class="error">データ取得失敗: ${e.message}<br>
-       ネットワーク環境によってはCORSプロキシが制限されます。<br>
-       <div class="fallback-links">
-         <a href="https://finance.yahoo.co.jp/quote/9984.T" target="_blank">📎 Yahoo!ファイナンス で確認</a>
-         <a href="https://group.softbank/ja/ir" target="_blank">📎 SoftBank Group IR</a>
-       </div></div>`;
-    return;
-  }
+    // Fetch price + overview in parallel
+    const [quoteData, overviewData] = await Promise.all([
+      avFetch({ function: 'GLOBAL_QUOTE', symbol: '9984.T' }),
+      avFetch({ function: 'OVERVIEW',     symbol: '9984.T' }),
+    ]);
 
-  try {
-    const r      = data.quoteSummary.result[0];
-    const price  = r.price              || {};
-    const sum    = r.summaryDetail      || {};
-    const kstat  = r.defaultKeyStatistics || {};
-    const fin    = r.financialData      || {};
+    const q = quoteData['Global Quote'] || {};
+    const o = overviewData || {};
 
-    const raw = {
-      currentPrice:  price.regularMarketPrice?.raw,
-      change:        price.regularMarketChange?.raw,
-      changePct:     price.regularMarketChangePercent?.raw,
-      marketCap:     price.marketCap?.raw,
-      volume:        price.regularMarketVolume?.raw,
-      per:           sum.trailingPE?.raw,
-      forwardPE:     kstat.forwardPE?.raw,
-      pbr:           kstat.priceToBook?.raw,
-      eps:           kstat.trailingEps?.raw,
-      divYield:      sum.dividendYield?.raw,
-      high52:        sum.fiftyTwoWeekHigh?.raw,
-      low52:         sum.fiftyTwoWeekLow?.raw,
-      profitMargin:  fin.profitMargins?.raw,
-      bookValue:     kstat.bookValue?.raw,
-      ev:            kstat.enterpriseValue?.raw,
-      totalDebt:     fin.totalDebt?.raw,
-      totalCash:     fin.totalCash?.raw,
-      currentRatio:  fin.currentRatio?.raw,
-      debtToEquity:  fin.debtToEquity?.raw,
-      revGrowth:     fin.revenueGrowth?.raw,
-      earnGrowth:    fin.earningsGrowth?.raw,
-      operatingMargin: fin.operatingMargins?.raw,
-      roe:           fin.returnOnEquity?.raw,
-    };
+    // Price fields from GLOBAL_QUOTE
+    const price    = safeNum(q['05. price']);
+    const change   = safeNum(q['09. change']);
+    const changePctRaw = q['10. change percent'] || '';
+    const changePct = safeNum(changePctRaw.replace('%',''));
+    const volume   = safeNum(q['06. volume']);
+    const open     = safeNum(q['02. open']);
+    const high     = safeNum(q['03. high']);
+    const low      = safeNum(q['04. low']);
+    const prevClose = safeNum(q['08. previous close']);
+    const latestDay = q['07. latest trading day'] || '';
+
+    // Fundamental fields from OVERVIEW
+    const mcap     = safeNum(o['MarketCapitalization']);
+    const per      = safeNum(o['PERatio']);
+    const forwardPE = safeNum(o['ForwardPE']);
+    const pbr      = safeNum(o['PriceToBookRatio']);
+    const eps      = safeNum(o['EPS']);
+    const bv       = safeNum(o['BookValue']);
+    const divYield = safeNum(o['DividendYield']);
+    const high52   = safeNum(o['52WeekHigh']);
+    const low52    = safeNum(o['52WeekLow']);
+    const profitMargin = safeNum(o['ProfitMargin']);
+    const opMargin = safeNum(o['OperatingMarginTTM']);
+    const roe      = safeNum(o['ReturnOnEquityTTM']);
+    const revGrowth = safeNum(o['QuarterlyRevenueGrowthYOY']);
+    const earnGrowth = safeNum(o['QuarterlyEarningsGrowthYOY']);
+    const ev       = safeNum(o['EVToEBITDA']);
+    const beta     = safeNum(o['Beta']);
 
     // ── Header
-    const p = raw.currentPrice;
-    document.getElementById('h-price').textContent  = p != null ? `¥${fmtInt(p)}` : '―';
+    document.getElementById('h-price').textContent =
+      price != null ? `¥${fmtInt(price)}` : '―';
 
-    const ch = raw.change, cp = raw.changePct;
     const chEl = document.getElementById('h-change');
-    if (ch != null) {
-      const sign = ch >= 0 ? '▲' : '▼';
-      chEl.className = `price-change ${ch >= 0 ? 'up' : 'down'}`;
-      chEl.textContent = `${sign} ¥${fmtInt(Math.abs(ch))} (${(cp*100).toFixed(2)}%)`;
+    if (change != null) {
+      const up = change >= 0;
+      chEl.className = `price-change ${up ? 'up' : 'down'}`;
+      chEl.textContent = `${up ? '▲' : '▼'} ¥${fmtInt(Math.abs(change))} (${Math.abs(changePct).toFixed(2)}%)`;
     }
-    document.getElementById('h-mcap').textContent  = fmtJPY(raw.marketCap);
-    document.getElementById('h-vol').textContent   = fmtVol(raw.volume);
-    document.getElementById('h-updated').textContent = '最終更新: ' + new Date().toLocaleString('ja-JP');
+    document.getElementById('h-mcap').textContent = fmtJPY(mcap);
+    document.getElementById('h-vol').textContent  = fmtVol(volume);
+    document.getElementById('h-updated').textContent =
+      `最終更新: ${new Date().toLocaleString('ja-JP')}　基準日: ${latestDay}`;
 
     // ── Stats bar
-    document.getElementById('s-per').textContent  = raw.per       ? fmtNum(raw.per, 1) + '倍'   : '―';
-    document.getElementById('s-fper').textContent = raw.forwardPE ? fmtNum(raw.forwardPE, 1) + '倍' : '―';
-    document.getElementById('s-pbr').textContent  = raw.pbr       ? fmtNum(raw.pbr, 2) + '倍'   : '―';
-    document.getElementById('s-eps').textContent  = raw.eps       ? '¥' + fmtInt(raw.eps)       : '―';
-    document.getElementById('s-div').textContent  = raw.divYield  ? fmtPct(raw.divYield)         : '―';
-    document.getElementById('s-high').textContent = raw.high52    ? '¥' + fmtInt(raw.high52)     : '―';
-    document.getElementById('s-low').textContent  = raw.low52     ? '¥' + fmtInt(raw.low52)      : '―';
-    document.getElementById('s-pm').textContent   = raw.profitMargin ? fmtPct(raw.profitMargin)  : '―';
+    document.getElementById('s-per').textContent  = per      ? fmtNum(per, 1) + '倍'      : '―';
+    document.getElementById('s-fper').textContent = forwardPE ? fmtNum(forwardPE,1) + '倍' : '―';
+    document.getElementById('s-pbr').textContent  = pbr      ? fmtNum(pbr, 2) + '倍'      : '―';
+    document.getElementById('s-eps').textContent  = eps      ? '¥' + fmtInt(eps)           : '―';
+    document.getElementById('s-div').textContent  = divYield ? (divYield * 100).toFixed(2) + '%' : '―';
+    document.getElementById('s-high').textContent = high52   ? '¥' + fmtInt(high52)        : '―';
+    document.getElementById('s-low').textContent  = low52    ? '¥' + fmtInt(low52)         : '―';
+    document.getElementById('s-pm').textContent   = profitMargin ? (profitMargin * 100).toFixed(1) + '%' : '―';
 
     // ── Fundamentals table
     const items = [
-      ['時価総額',           fmtJPY(raw.marketCap)],
-      ['企業価値（EV）',     fmtJPY(raw.ev)],
-      ['PER（実績）',        raw.per       ? fmtNum(raw.per, 1) + '倍' : '―'],
-      ['PER（予想）',        raw.forwardPE ? fmtNum(raw.forwardPE, 1) + '倍' : '―'],
-      ['PBR',                raw.pbr       ? fmtNum(raw.pbr, 2) + '倍' : '―'],
-      ['EPS',                raw.eps       ? '¥' + fmtInt(raw.eps) : '―'],
-      ['1株純資産（BPS）',   raw.bookValue ? '¥' + fmtInt(raw.bookValue) : '―'],
-      ['配当利回り',         raw.divYield  ? fmtPct(raw.divYield) : '―'],
-      ['売上高成長率（前年）', raw.revGrowth   ? fmtPct(raw.revGrowth)   : '―'],
-      ['純利益成長率（前年）', raw.earnGrowth  ? fmtPct(raw.earnGrowth)  : '―'],
-      ['営業利益率',         raw.operatingMargin ? fmtPct(raw.operatingMargin) : '―'],
-      ['純利益率',           raw.profitMargin    ? fmtPct(raw.profitMargin)    : '―'],
-      ['ROE',                raw.roe       ? fmtPct(raw.roe)  : '―'],
-      ['流動比率',           raw.currentRatio    ? fmtNum(raw.currentRatio, 2) : '―'],
-      ['D/Eレシオ',          raw.debtToEquity    ? fmtNum(raw.debtToEquity, 1) + '%' : '―'],
-      ['総負債',             fmtJPY(raw.totalDebt)],
-      ['現金・同等物',       fmtJPY(raw.totalCash)],
-      ['52週高値',           raw.high52 ? '¥' + fmtInt(raw.high52) : '―'],
+      ['時価総額',           fmtJPY(mcap)],
+      ['当日始値',           price != null ? `¥${fmtInt(open)}` : '―'],
+      ['当日高値',           high  != null ? `¥${fmtInt(high)}`  : '―'],
+      ['当日安値',           low   != null ? `¥${fmtInt(low)}`   : '―'],
+      ['前日終値',           prevClose != null ? `¥${fmtInt(prevClose)}` : '―'],
+      ['出来高',             fmtVol(volume)],
+      ['PER（実績TTM）',     per       ? fmtNum(per, 1) + '倍'       : '―'],
+      ['PER（予想）',        forwardPE ? fmtNum(forwardPE, 1) + '倍' : '―'],
+      ['PBR',                pbr       ? fmtNum(pbr, 2) + '倍'       : '―'],
+      ['EPS（TTM）',         eps       ? '¥' + fmtInt(eps)           : '―'],
+      ['1株純資産（BPS）',   bv        ? '¥' + fmtNum(bv, 0)        : '―'],
+      ['配当利回り',         divYield  ? (divYield * 100).toFixed(2) + '%' : '―'],
+      ['52週高値',           high52    ? '¥' + fmtInt(high52)        : '―'],
+      ['52週安値',           low52     ? '¥' + fmtInt(low52)         : '―'],
+      ['純利益率（TTM）',    profitMargin ? (profitMargin*100).toFixed(1)+'%' : '―'],
+      ['営業利益率（TTM）',  opMargin  ? (opMargin*100).toFixed(1)+'%' : '―'],
+      ['ROE（TTM）',         roe       ? (roe*100).toFixed(1)+'%'    : '―'],
+      ['売上成長率（前四半期YoY）', revGrowth  ? (revGrowth*100).toFixed(1)+'%' : '―'],
+      ['利益成長率（前四半期YoY）', earnGrowth ? (earnGrowth*100).toFixed(1)+'%' : '―'],
+      ['ベータ値',           beta      ? fmtNum(beta, 2)              : '―'],
     ];
 
-    const html = `
+    document.getElementById('fund-body').innerHTML = `
       <div class="fund-grid">
         ${items.map(([l, v]) =>
           `<div class="fund-item">
@@ -446,37 +440,41 @@ async function loadFundamentals() {
         ).join('')}
       </div>
       <div class="nav-note">
-        💡 <strong>SBG固有の指標</strong>：NAV（純資産価値）およびNAVディスカウント率は
+        💡 <strong>SBG固有の指標</strong>：NAV（純資産価値）は
         <a href="https://group.softbank/ja/ir/stock/sotp" target="_blank" style="color:#58a6ff;">SoftBank Group 公式IR</a>
-        で確認できます。Armの株価がNAVの最大変動要因です。
+        で確認できます。データ提供: Alpha Vantage（無料版・日次更新）
       </div>`;
 
-    document.getElementById('fund-body').innerHTML = html;
-
-  } catch (parseErr) {
+  } catch (e) {
     document.getElementById('fund-body').innerHTML =
-      `<div class="error">データの解析に失敗しました: ${parseErr.message}</div>`;
+      `<div class="error">データ取得失敗: ${e.message}<br>
+       <div class="fallback-links">
+         <a href="https://finance.yahoo.co.jp/quote/9984.T" target="_blank">📎 Yahoo!ファイナンスで確認</a>
+         <a href="https://group.softbank/ja/ir" target="_blank">📎 SoftBank Group IR</a>
+       </div></div>`;
   }
 }
 
 // ── Load news ────────────────────────────────────
 async function loadNews() {
-  const newsUrl = 'https://query2.finance.yahoo.com/v1/finance/search'
-    + '?q=9984.T&quotesCount=0&newsCount=12&enableFuzzyQuery=false&lang=ja';
-
   try {
-    const data = await proxyFetch(newsUrl, 10000);
-    const items = (data.news || []).slice(0, 10);
+    const data = await avFetch({
+      function: 'NEWS_SENTIMENT',
+      tickers: '9984.T',
+      limit: '10',
+    });
 
-    if (items.length === 0) throw new Error('記事なし');
+    const feed = data.feed || [];
+    if (feed.length === 0) throw new Error('記事なし');
 
-    document.getElementById('news-body').innerHTML = items.map(n => `
+    document.getElementById('news-body').innerHTML = feed.slice(0, 10).map(n => `
       <div class="news-item">
         <div class="news-title">
-          <a href="${n.link || '#'}" target="_blank" rel="noopener noreferrer">${n.title || '(タイトルなし)'}</a>
+          <a href="${n.url || '#'}" target="_blank" rel="noopener noreferrer">${n.title || '(タイトルなし)'}</a>
         </div>
         <div class="news-meta">
-          ${n.publisher ? n.publisher + ' ／ ' : ''}${fmtDate(n.providerPublishTime)}
+          ${n.source ? n.source + ' ／ ' : ''}${fmtAVDate(n.time_published)}
+          ${n.overall_sentiment_label ? ` ／ センチメント: ${n.overall_sentiment_label}` : ''}
         </div>
       </div>`).join('');
 
