@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ソフトバンクG (9984) 分析ダッシュボード</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0d1117;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', 'Hiragino Sans', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ─── Header ─────────────────────────────────── */
+    .header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      flex-wrap: wrap;
+    }
+    .company-block { min-width: 160px; }
+    .company-name { font-size: 18px; font-weight: 700; color: #fff; }
+    .ticker { color: #8b949e; font-size: 13px; margin-top: 2px; }
+
+    .price-block { display: flex; flex-direction: column; gap: 3px; }
+    .current-price { font-size: 30px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .price-change { font-size: 15px; font-weight: 600; }
+    .up   { color: #3fb950; }
+    .down { color: #f85149; }
+
+    .meta-block { font-size: 13px; color: #8b949e; line-height: 1.7; }
+    .meta-block span { color: #c9d1d9; font-weight: 600; }
+
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .updated { font-size: 12px; color: #6e7681; }
+    .refresh-btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: background .15s;
+    }
+    .refresh-btn:hover { background: #2ea043; }
+    .refresh-btn:disabled { background: #333; cursor: default; }
+
+    /* ─── Layout ──────────────────────────────────── */
+    .container { padding: 16px 20px; max-width: 1700px; margin: 0 auto; }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 11px 14px;
+    }
+    .stat-label { font-size: 11px; color: #8b949e; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+    .stat-value { font-size: 17px; font-weight: 700; color: #e6edf3; }
+
+    /* Chart row */
+    .chart-row {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 14px;
+      margin-bottom: 14px;
+      min-height: 520px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid #30363d;
+      font-size: 12px;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      flex-shrink: 0;
+    }
+    .card-body { padding: 16px; flex: 1; overflow-y: auto; }
+
+    #tv-chart-wrap { flex: 1; min-height: 480px; }
+    #tv-ta-wrap    { flex: 1; min-height: 480px; }
+
+    /* Bottom row */
+    .bottom-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    /* Fundamental grid */
+    .fund-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 16px;
+    }
+    .fund-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #21262d;
+      gap: 8px;
+    }
+    .fund-item:last-child  { border-bottom: none; }
+    .fund-label { font-size: 12px; color: #8b949e; white-space: nowrap; }
+    .fund-value { font-size: 13px; font-weight: 700; color: #e6edf3; text-align: right; }
+
+    /* News */
+    .news-item {
+      padding: 11px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .news-item:last-child { border-bottom: none; }
+    .news-title { font-size: 13px; color: #c9d1d9; line-height: 1.45; margin-bottom: 4px; }
+    .news-title a { color: #58a6ff; text-decoration: none; }
+    .news-title a:hover { text-decoration: underline; }
+    .news-meta { font-size: 11px; color: #6e7681; }
+
+    /* Loading / error */
+    .loading { color: #8b949e; font-size: 13px; text-align: center; padding: 24px; }
+    .error   { color: #f85149; font-size: 13px; line-height: 1.6; }
+    .fallback-links { margin-top: 12px; }
+    .fallback-links a { color: #58a6ff; text-decoration: none; display: block; margin-bottom: 6px; font-size: 13px; }
+
+    /* NAV note */
+    .nav-note {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+    .nav-note strong { color: #e6edf3; }
+  </style>
+</head>
+<body>
+
+<!-- ─── Header ─────────────────────────────────── -->
+<div class="header">
+  <div class="company-block">
+    <div class="company-name">ソフトバンクグループ</div>
+    <div class="ticker">東証プライム 9984.T ／ OTC: SFTBY</div>
+  </div>
+
+  <div class="price-block">
+    <div class="current-price" id="h-price">―</div>
+    <div class="price-change up" id="h-change">―</div>
+  </div>
+
+  <div class="meta-block">
+    <div>時価総額: <span id="h-mcap">―</span></div>
+    <div>出来高: <span id="h-vol">―</span></div>
+  </div>
+
+  <div class="header-right">
+    <div class="updated" id="h-updated"></div>
+    <button class="refresh-btn" id="refresh-btn" onclick="loadAll()">🔄 更新</button>
+  </div>
+</div>
+
+<!-- ─── Container ─────────────────────────────── -->
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-label">PER（実績）</div><div class="stat-value" id="s-per">―</div></div>
+    <div class="stat-card"><div class="stat-label">PER（予想）</div><div class="stat-value" id="s-fper">―</div></div>
+    <div class="stat-card"><div class="stat-label">PBR</div><div class="stat-value" id="s-pbr">―</div></div>
+    <div class="stat-card"><div class="stat-label">EPS</div><div class="stat-value" id="s-eps">―</div></div>
+    <div class="stat-card"><div class="stat-label">配当利回り</div><div class="stat-value" id="s-div">―</div></div>
+    <div class="stat-card"><div class="stat-label">52週高値</div><div class="stat-value" id="s-high">―</div></div>
+    <div class="stat-card"><div class="stat-label">52週安値</div><div class="stat-value" id="s-low">―</div></div>
+    <div class="stat-card"><div class="stat-label">純利益率</div><div class="stat-value" id="s-pm">―</div></div>
+  </div>
+
+  <!-- Chart row -->
+  <div class="chart-row">
+    <div class="card">
+      <div class="card-header">📈 テクニカルチャート — MA / MACD / RSI / ボリンジャー</div>
+      <div id="tv-chart-wrap"></div>
+    </div>
+    <div class="card">
+      <div class="card-header">🎯 テクニカル分析サマリー</div>
+      <div id="tv-ta-wrap"></div>
+    </div>
+  </div>
+
+  <!-- Bottom row -->
+  <div class="bottom-row">
+    <div class="card">
+      <div class="card-header">📊 ファンダメンタル分析</div>
+      <div class="card-body" id="fund-body">
+        <div class="loading">データ読み込み中…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">📰 最新ニュース</div>
+      <div class="card-body" id="news-body">
+        <div class="loading">ニュース読み込み中…</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+
+<!-- ─── TradingView Chart ──────────────────────── -->
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  new TradingView.widget({
+    container_id: 'tv-chart-wrap',
+    autosize: true,
+    symbol: 'TSE:9984',
+    interval: 'D',
+    timezone: 'Asia/Tokyo',
+    theme: 'dark',
+    style: '1',
+    locale: 'ja',
+    enable_publishing: false,
+    allow_symbol_change: false,
+    hide_top_toolbar: false,
+    save_image: false,
+    studies: [
+      'MASimple@tv-basicstudies',
+      'MASimple@tv-basicstudies',
+      'BB@tv-basicstudies',
+      'MACD@tv-basicstudies',
+      'RSI@tv-basicstudies',
+    ],
+    studies_overrides: {
+      'moving average.length.0': 25,
+      'moving average.length.1': 75,
+    }
+  });
+});
+</script>
+
+<!-- ─── TradingView Technical Analysis Widget ─── -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var wrap = document.getElementById('tv-ta-wrap');
+  var s = document.createElement('script');
+  s.src = 'https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js';
+  s.async = true;
+  s.textContent = JSON.stringify({
+    interval: '1D',
+    width: '100%',
+    height: '100%',
+    isTransparent: true,
+    symbol: 'TSE:9984',
+    showIntervalTabs: true,
+    displayMode: 'single',
+    locale: 'ja',
+    colorTheme: 'dark'
+  });
+  wrap.appendChild(s);
+});
+</script>
+
+
+<!-- ─── Data fetch (Yahoo Finance via CORS proxy) ─ -->
+<script>
+// ── Formatters ───────────────────────────────────
+function fmtNum(n, d = 1) {
+  if (n == null || isNaN(n)) return '―';
+  return n.toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtInt(n) {
+  if (n == null || isNaN(n)) return '―';
+  return Math.round(n).toLocaleString('ja-JP');
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n)) return '―';
+  return (n * 100).toFixed(2) + '%';
+}
+function fmtJPY(n) {
+  if (n == null || isNaN(n)) return '―';
+  if (n >= 1e12) return (n / 1e12).toFixed(1) + '兆円';
+  if (n >= 1e8)  return (n / 1e8).toFixed(0)  + '億円';
+  if (n >= 1e4)  return (n / 1e4).toFixed(0)  + '万円';
+  return fmtInt(n) + '円';
+}
+function fmtVol(n) {
+  if (n == null || isNaN(n)) return '―';
+  if (n >= 1e8) return (n / 1e8).toFixed(1) + '億株';
+  if (n >= 1e4) return (n / 1e4).toFixed(0) + '万株';
+  return fmtInt(n) + '株';
+}
+function fmtDate(ts) {
+  if (!ts) return '';
+  return new Date(ts * 1000).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// ── CORS proxy fetch ─────────────────────────────
+async function proxyFetch(url, timeoutMs = 10000) {
+  const proxies = [
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  ];
+  for (const makeProxy of proxies) {
+    try {
+      const res = await fetch(makeProxy(url), { signal: AbortSignal.timeout(timeoutMs) });
+      if (!res.ok) continue;
+      const json = await res.json();
+      // allorigins wraps in {contents:"..."}, corsproxy returns raw JSON
+      if (json && json.contents) return JSON.parse(json.contents);
+      return json;
+    } catch (e) { /* try next */ }
+  }
+  throw new Error('全プロキシが失敗しました。');
+}
+
+// ── Load fundamentals + price ────────────────────
+async function loadFundamentals() {
+  const apiUrl = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/9984.T'
+    + '?modules=price,summaryDetail,defaultKeyStatistics,financialData';
+
+  let data;
+  try {
+    data = await proxyFetch(apiUrl);
+  } catch (e) {
+    document.getElementById('fund-body').innerHTML =
+      `<div class="error">データ取得失敗: ${e.message}<br>
+       ネットワーク環境によってはCORSプロキシが制限されます。<br>
+       <div class="fallback-links">
+         <a href="https://finance.yahoo.co.jp/quote/9984.T" target="_blank">📎 Yahoo!ファイナンス で確認</a>
+         <a href="https://group.softbank/ja/ir" target="_blank">📎 SoftBank Group IR</a>
+       </div></div>`;
+    return;
+  }
+
+  try {
+    const r      = data.quoteSummary.result[0];
+    const price  = r.price              || {};
+    const sum    = r.summaryDetail      || {};
+    const kstat  = r.defaultKeyStatistics || {};
+    const fin    = r.financialData      || {};
+
+    const raw = {
+      currentPrice:  price.regularMarketPrice?.raw,
+      change:        price.regularMarketChange?.raw,
+      changePct:     price.regularMarketChangePercent?.raw,
+      marketCap:     price.marketCap?.raw,
+      volume:        price.regularMarketVolume?.raw,
+      per:           sum.trailingPE?.raw,
+      forwardPE:     kstat.forwardPE?.raw,
+      pbr:           kstat.priceToBook?.raw,
+      eps:           kstat.trailingEps?.raw,
+      divYield:      sum.dividendYield?.raw,
+      high52:        sum.fiftyTwoWeekHigh?.raw,
+      low52:         sum.fiftyTwoWeekLow?.raw,
+      profitMargin:  fin.profitMargins?.raw,
+      bookValue:     kstat.bookValue?.raw,
+      ev:            kstat.enterpriseValue?.raw,
+      totalDebt:     fin.totalDebt?.raw,
+      totalCash:     fin.totalCash?.raw,
+      currentRatio:  fin.currentRatio?.raw,
+      debtToEquity:  fin.debtToEquity?.raw,
+      revGrowth:     fin.revenueGrowth?.raw,
+      earnGrowth:    fin.earningsGrowth?.raw,
+      operatingMargin: fin.operatingMargins?.raw,
+      roe:           fin.returnOnEquity?.raw,
+    };
+
+    // ── Header
+    const p = raw.currentPrice;
+    document.getElementById('h-price').textContent  = p != null ? `¥${fmtInt(p)}` : '―';
+
+    const ch = raw.change, cp = raw.changePct;
+    const chEl = document.getElementById('h-change');
+    if (ch != null) {
+      const sign = ch >= 0 ? '▲' : '▼';
+      chEl.className = `price-change ${ch >= 0 ? 'up' : 'down'}`;
+      chEl.textContent = `${sign} ¥${fmtInt(Math.abs(ch))} (${(cp*100).toFixed(2)}%)`;
+    }
+    document.getElementById('h-mcap').textContent  = fmtJPY(raw.marketCap);
+    document.getElementById('h-vol').textContent   = fmtVol(raw.volume);
+    document.getElementById('h-updated').textContent = '最終更新: ' + new Date().toLocaleString('ja-JP');
+
+    // ── Stats bar
+    document.getElementById('s-per').textContent  = raw.per       ? fmtNum(raw.per, 1) + '倍'   : '―';
+    document.getElementById('s-fper').textContent = raw.forwardPE ? fmtNum(raw.forwardPE, 1) + '倍' : '―';
+    document.getElementById('s-pbr').textContent  = raw.pbr       ? fmtNum(raw.pbr, 2) + '倍'   : '―';
+    document.getElementById('s-eps').textContent  = raw.eps       ? '¥' + fmtInt(raw.eps)       : '―';
+    document.getElementById('s-div').textContent  = raw.divYield  ? fmtPct(raw.divYield)         : '―';
+    document.getElementById('s-high').textContent = raw.high52    ? '¥' + fmtInt(raw.high52)     : '―';
+    document.getElementById('s-low').textContent  = raw.low52     ? '¥' + fmtInt(raw.low52)      : '―';
+    document.getElementById('s-pm').textContent   = raw.profitMargin ? fmtPct(raw.profitMargin)  : '―';
+
+    // ── Fundamentals table
+    const items = [
+      ['時価総額',           fmtJPY(raw.marketCap)],
+      ['企業価値（EV）',     fmtJPY(raw.ev)],
+      ['PER（実績）',        raw.per       ? fmtNum(raw.per, 1) + '倍' : '―'],
+      ['PER（予想）',        raw.forwardPE ? fmtNum(raw.forwardPE, 1) + '倍' : '―'],
+      ['PBR',                raw.pbr       ? fmtNum(raw.pbr, 2) + '倍' : '―'],
+      ['EPS',                raw.eps       ? '¥' + fmtInt(raw.eps) : '―'],
+      ['1株純資産（BPS）',   raw.bookValue ? '¥' + fmtInt(raw.bookValue) : '―'],
+      ['配当利回り',         raw.divYield  ? fmtPct(raw.divYield) : '―'],
+      ['売上高成長率（前年）', raw.revGrowth   ? fmtPct(raw.revGrowth)   : '―'],
+      ['純利益成長率（前年）', raw.earnGrowth  ? fmtPct(raw.earnGrowth)  : '―'],
+      ['営業利益率',         raw.operatingMargin ? fmtPct(raw.operatingMargin) : '―'],
+      ['純利益率',           raw.profitMargin    ? fmtPct(raw.profitMargin)    : '―'],
+      ['ROE',                raw.roe       ? fmtPct(raw.roe)  : '―'],
+      ['流動比率',           raw.currentRatio    ? fmtNum(raw.currentRatio, 2) : '―'],
+      ['D/Eレシオ',          raw.debtToEquity    ? fmtNum(raw.debtToEquity, 1) + '%' : '―'],
+      ['総負債',             fmtJPY(raw.totalDebt)],
+      ['現金・同等物',       fmtJPY(raw.totalCash)],
+      ['52週高値',           raw.high52 ? '¥' + fmtInt(raw.high52) : '―'],
+    ];
+
+    const html = `
+      <div class="fund-grid">
+        ${items.map(([l, v]) =>
+          `<div class="fund-item">
+             <span class="fund-label">${l}</span>
+             <span class="fund-value">${v}</span>
+           </div>`
+        ).join('')}
+      </div>
+      <div class="nav-note">
+        💡 <strong>SBG固有の指標</strong>：NAV（純資産価値）およびNAVディスカウント率は
+        <a href="https://group.softbank/ja/ir/stock/sotp" target="_blank" style="color:#58a6ff;">SoftBank Group 公式IR</a>
+        で確認できます。Armの株価がNAVの最大変動要因です。
+      </div>`;
+
+    document.getElementById('fund-body').innerHTML = html;
+
+  } catch (parseErr) {
+    document.getElementById('fund-body').innerHTML =
+      `<div class="error">データの解析に失敗しました: ${parseErr.message}</div>`;
+  }
+}
+
+// ── Load news ────────────────────────────────────
+async function loadNews() {
+  const newsUrl = 'https://query2.finance.yahoo.com/v1/finance/search'
+    + '?q=9984.T&quotesCount=0&newsCount=12&enableFuzzyQuery=false&lang=ja';
+
+  try {
+    const data = await proxyFetch(newsUrl, 10000);
+    const items = (data.news || []).slice(0, 10);
+
+    if (items.length === 0) throw new Error('記事なし');
+
+    document.getElementById('news-body').innerHTML = items.map(n => `
+      <div class="news-item">
+        <div class="news-title">
+          <a href="${n.link || '#'}" target="_blank" rel="noopener noreferrer">${n.title || '(タイトルなし)'}</a>
+        </div>
+        <div class="news-meta">
+          ${n.publisher ? n.publisher + ' ／ ' : ''}${fmtDate(n.providerPublishTime)}
+        </div>
+      </div>`).join('');
+
+  } catch (e) {
+    document.getElementById('news-body').innerHTML = `
+      <div class="error">
+        ニュースの自動取得ができませんでした。<br>以下のサイトでご確認ください：
+        <div class="fallback-links">
+          <a href="https://finance.yahoo.co.jp/quote/9984.T/news" target="_blank">📰 Yahoo!ファイナンス ニュース</a>
+          <a href="https://www.nikkei.com/nkd/company/news/?scode=9984" target="_blank">📰 日経電子版 企業ニュース</a>
+          <a href="https://group.softbank/ja/news" target="_blank">📰 SoftBank Group 公式ニュース</a>
+        </div>
+      </div>`;
+  }
+}
+
+// ── Init ─────────────────────────────────────────
+function setRefreshState(loading) {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = loading;
+  btn.textContent = loading ? '⏳ 読み込み中…' : '🔄 更新';
+}
+
+async function loadAll() {
+  setRefreshState(true);
+  await Promise.allSettled([loadFundamentals(), loadNews()]);
+  setRefreshState(false);
+}
+
+document.addEventListener('DOMContentLoaded', loadAll);
+</script>
+
+</body>
+</html>
